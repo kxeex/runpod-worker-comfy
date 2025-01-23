@@ -7,35 +7,52 @@ on:
       - main
 
 jobs:
-  docker:
+  dev:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Log in to Docker Hub
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Clear space to remove unused folders
+        run: |
+          rm -rf /usr/share/dotnet
+          rm -rf /opt/ghc
+          rm -rf "/usr/local/share/boost"
+          rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: "lab:latest"
-          driver: cloud
-          endpoint: "${{ vars.DOCKER_USER }}/test001"
-          install: true
+      - name: Set environment variables
+        run: |
+          echo "DOCKERHUB_REPO=${{ vars.DOCKERHUB_REPO }}" >> $GITHUB_ENV
+          echo "DOCKERHUB_IMG=${{ vars.DOCKERHUB_IMG }}" >> $GITHUB_ENV
+          echo "HUGGINGFACE_ACCESS_TOKEN=${{ secrets.HUGGINGFACE_ACCESS_TOKEN }}" >> $GITHUB_ENV
+          echo "RELEASE_VERSION=${GITHUB_REF##refs/heads/}" | sed 's/\//-/g' >> $GITHUB_ENV
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - name: Build and push the images to Docker Hub
+        uses: docker/bake-action@v2
         with:
-          context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/runpod-worker-comfy:latest
-          platforms: linux/amd64
-          build-args: |
-            MODEL_TYPE=sdxl
-            HUGGINGFACE_ACCESS_TOKEN=${{ secrets.HUGGINGFACE_ACCESS_TOKEN }}
-          outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry,push=true' }}
+          set: |
+            *.args.DOCKERHUB_REPO=${{ env.DOCKERHUB_REPO }}
+            *.args.DOCKERHUB_IMG=${{ env.DOCKERHUB_IMG }}
+            *.args.RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+            *.args.HUGGINGFACE_ACCESS_TOKEN=${{ env.HUGGINGFACE_ACCESS_TOKEN }}
